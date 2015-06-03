@@ -1,0 +1,59 @@
+K 25
+svn:wc:ra_dav:version-url
+V 77
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport
+END
+KexManager.java
+K 25
+svn:wc:ra_dav:version-url
+V 93
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/KexManager.java
+END
+MessageHandler.java
+K 25
+svn:wc:ra_dav:version-url
+V 97
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/MessageHandler.java
+END
+NegotiatedParameters.java
+K 25
+svn:wc:ra_dav:version-url
+V 103
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/NegotiatedParameters.java
+END
+TransportManager.java
+K 25
+svn:wc:ra_dav:version-url
+V 99
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/TransportManager.java
+END
+KexState.java
+K 25
+svn:wc:ra_dav:version-url
+V 91
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/KexState.java
+END
+ClientServerHello.java
+K 25
+svn:wc:ra_dav:version-url
+V 100
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/ClientServerHello.java
+END
+KexParameters.java
+K 25
+svn:wc:ra_dav:version-url
+V 96
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/KexParameters.java
+END
+TransportConnection.java
+K 25
+svn:wc:ra_dav:version-url
+V 102
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/TransportConnection.java
+END
+NegotiateException.java
+K 25
+svn:wc:ra_dav:version-url
+V 101
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/transport/NegotiateException.java
+END

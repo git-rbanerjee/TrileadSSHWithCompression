@@ -1,0 +1,29 @@
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/compression
+END
+ICompressor.java
+K 25
+svn:wc:ra_dav:version-url
+V 96
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/compression/ICompressor.java
+END
+CompressionFactory.java
+K 25
+svn:wc:ra_dav:version-url
+V 103
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/compression/CompressionFactory.java
+END
+Zlib.java
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/compression/Zlib.java
+END
+ZlibOpenSSH.java
+K 25
+svn:wc:ra_dav:version-url
+V 96
+/svn/nArgusL2_PG/!svn/ver/147/CustomTrileadSSH/src/com/trilead/ssh2/compression/ZlibOpenSSH.java
+END
