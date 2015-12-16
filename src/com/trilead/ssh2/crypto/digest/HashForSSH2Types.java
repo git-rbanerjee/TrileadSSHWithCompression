@@ -2,9 +2,6 @@
 package com.trilead.ssh2.crypto.digest;
 
 import java.math.BigInteger;
-import java.security.DigestException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 /**
  * HashForSSH2Types.
@@ -14,15 +11,25 @@ import java.security.NoSuchAlgorithmException;
  */
 public class HashForSSH2Types
 {
-	MessageDigest md;
+	Digest md;
+
+	public HashForSSH2Types(Digest md)
+	{
+		this.md = md;
+	}
 
 	public HashForSSH2Types(String type)
 	{
-		try {
-			md = MessageDigest.getInstance(type);
-		} catch (NoSuchAlgorithmException e) {
-			throw new RuntimeException("Unsupported algorithm " + type);
+		if (type.equals("SHA1"))
+		{
+			md = new SHA1();
 		}
+		else if (type.equals("MD5"))
+		{
+			md = new MD5();
+		}
+		else
+			throw new IllegalArgumentException("Unknown algorithm " + type);
 	}
 
 	public void updateByte(byte b)
@@ -81,11 +88,6 @@ public class HashForSSH2Types
 
 	public void getDigest(byte[] out, int off)
 	{
-		try {
-			md.digest(out, off, out.length - off);
-		} catch (DigestException e) {
-			// TODO is this right?!
-			throw new RuntimeException("Unable to digest", e);
-		}
+		md.digest(out, off);
 	}
 }

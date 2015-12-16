@@ -1,18 +1,6 @@
-
 package com.trilead.ssh2;
 
-import java.io.CharArrayWriter;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.SocketTimeoutException;
-import java.security.KeyPair;
-import java.security.SecureRandom;
-import java.security.Security;
-import java.util.Set;
-import java.util.Vector;
-
+import com.trilead.ssh2.auth.AgentProxy;
 import com.trilead.ssh2.auth.AuthenticationManager;
 import com.trilead.ssh2.channel.ChannelManager;
 import com.trilead.ssh2.crypto.CryptoWishList;
@@ -20,10 +8,22 @@ import com.trilead.ssh2.crypto.cipher.BlockCipherFactory;
 import com.trilead.ssh2.crypto.digest.MAC;
 import com.trilead.ssh2.log.Logger;
 import com.trilead.ssh2.packets.PacketIgnore;
+import com.trilead.ssh2.transport.ClientServerHello;
 import com.trilead.ssh2.transport.KexManager;
 import com.trilead.ssh2.transport.TransportManager;
 import com.trilead.ssh2.util.TimeoutService;
 import com.trilead.ssh2.util.TimeoutService.TimeoutToken;
+
+import java.io.CharArrayWriter;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.SocketTimeoutException;
+import java.security.SecureRandom;
+import java.util.Vector;
 
 /**
  * A <code>Connection</code> is used to establish an encrypted TCP/IP
@@ -57,6 +57,8 @@ public class Connection
 	 * connection. Note: SecureRandom.nextBytes() is thread safe.
 	 */
 	private SecureRandom generator;
+	
+	private boolean compression = true;
 
 	/**
 	 * Unless you know what you are doing, you will never need this.
@@ -92,7 +94,6 @@ public class Connection
 	private AuthenticationManager am;
 
 	private boolean authenticated = false;
-	private boolean compression = true;
 	private ChannelManager cm;
 
 	private CryptoWishList cryptoWishList = new CryptoWishList();
@@ -109,7 +110,7 @@ public class Connection
 
 	private ProxyData proxyData = null;
 
-	private Vector<ConnectionMonitor> connectionMonitors = new Vector<ConnectionMonitor>();
+	private Vector connectionMonitors = new Vector();
 
 	/**
 	 * Prepares a fresh <code>Connection</code> object which can then be used
@@ -215,6 +216,27 @@ public class Connection
 			throws IOException
 	{
 		return authenticateWithKeyboardInteractive(user, null, cb);
+	}
+
+	public synchronized boolean authenticateWithAgent(String user, AgentProxy proxy) throws IOException {
+		if (tm == null)
+			throw new IllegalStateException("Connection is not established!");
+
+		if (authenticated)
+			throw new IllegalStateException("Connection is already authenticated!");
+
+		if (am == null)
+			am = new AuthenticationManager(tm);
+
+		if (cm == null)
+			cm = new ChannelManager(tm);
+
+		if (user == null)
+			throw new IllegalArgumentException("user argument is null");
+
+		authenticated = am.authenticatePublicKey(user, proxy);
+
+		return authenticated;
 	}
 
 	/**
@@ -448,59 +470,7 @@ public class Connection
 
 		return authenticated;
 	}
-	
-	/**
-	 * After a successful connect, one has to authenticate oneself. The
-	 * authentication method "publickey" works by signing a challenge sent by
-	 * the server. The signature is either DSA or RSA based - it just depends on
-	 * the type of private key you specify, either a DSA or RSA private key in
-	 * PEM format. And yes, this is may seem to be a little confusing, the
-	 * method is called "publickey" in the SSH-2 protocol specification, however
-	 * since we need to generate a signature, you actually have to supply a
-	 * private key =).
-	 * <p>
-	 * If the authentication phase is complete, <code>true</code> will be
-	 * returned. If the server does not accept the request (or if further
-	 * authentication steps are needed), <code>false</code> is returned and
-	 * one can retry either by using this or any other authentication method
-	 * (use the <code>getRemainingAuthMethods</code> method to get a list of
-	 * the remaining possible methods).
-	 * 
-	 * @param user
-	 *            A <code>String</code> holding the username.
-	 * @param key
-	 *            A <code>RSAPrivateKey</code> or <code>DSAPrivateKey</code>
-	 *            containing a DSA or RSA private key of
-	 *            the user in Trilead object format.
-	 * 
-	 * @return whether the connection is now authenticated.
-	 * @throws IOException
-	 */
-	public synchronized boolean authenticateWithPublicKey(String user, KeyPair pair)
-			throws IOException
-	{
-		if (tm == null)
-			throw new IllegalStateException("Connection is not established!");
 
-		if (authenticated)
-			throw new IllegalStateException("Connection is already authenticated!");
-
-		if (am == null)
-			am = new AuthenticationManager(tm);
-
-		if (cm == null)
-			cm = new ChannelManager(tm);
-
-		if (user == null)
-			throw new IllegalArgumentException("user argument is null");
-
-		if (pair == null)
-			throw new IllegalArgumentException("Key pair argument is null");
-
-		authenticated = am.authenticatePublicKey(user, pair, getOrCreateSecureRND());
-
-		return authenticated;
-	}
 	/**
 	 * A convenience wrapper function which reads in a private key (PEM format,
 	 * either DSA or RSA) and then calls
@@ -578,19 +548,22 @@ public class Connection
 			tm.setConnectionMonitors(connectionMonitors);
 	}
 
-	/**
-	 * Controls whether compression is used on the link or not.
-	 * <p>
-	 * Note: This can only be called before connect()
-	 * @param enabled whether to enable compression
-	 * @throws IOException
-	 */
-	public synchronized void setCompression(boolean enabled) throws IOException {
-		if (tm != null)
-			throw new IOException("Connection to " + hostname + " is already in connected state!");
-		
-		compression = enabled;
-	}
+	
+	
+		/**
+			 * Controls whether compression is used on the link or not.
+			 * <p>
+			 * Note: This can only be called before connect()
+			 * @param enabled whether to enable compression
+			 * @throws IOException
+			 */
+			public synchronized void setCompression(boolean enabled) throws IOException {
+				if (tm != null)
+					throw new IOException("Connection to " + hostname + " is already in connected state!");
+				
+				compression = enabled;
+			}
+
 	
 	/**
 	 * Close the connection to the SSH-2 server. All assigned sessions will be
@@ -729,9 +702,12 @@ public class Connection
 	 *             proxy is buggy and does not return a proper HTTP response,
 	 *             then a normal IOException is thrown instead.
 	 */
-	public synchronized ConnectionInfo connect(ServerHostKeyVerifier verifier, int connectTimeout, int kexTimeout)
-			throws IOException
-	{
+	public synchronized ConnectionInfo connect(ServerHostKeyVerifier verifier, int connectTimeout, int kexTimeout) throws IOException {
+			return connect(verifier, connectTimeout, 0, kexTimeout);
+    }
+
+    public synchronized ConnectionInfo connect(ServerHostKeyVerifier verifier, int connectTimeout, int readTimeout, int kexTimeout)
+		            throws IOException {
 		final class TimeoutState
 		{
 			boolean isCancelled = false;
@@ -750,15 +726,15 @@ public class Connection
 		final TimeoutState state = new TimeoutState();
 
 		tm = new TransportManager(hostname, port);
-
-		tm.setConnectionMonitors(connectionMonitors);
-
-		// Don't offer compression if not requested
-		if (!compression) {
-			cryptoWishList.c2s_comp_algos = new String[] { "none" };
-			cryptoWishList.s2c_comp_algos = new String[] { "none" };
-		}
 		
+		tm.setConnectionMonitors(connectionMonitors);
+		
+		// Don't offer compression if not requested
+				if (!compression) {
+					cryptoWishList.c2s_comp_algos = new String[] { "none" };
+					cryptoWishList.s2c_comp_algos = new String[] { "none" };
+				}
+
 		/*
 		 * Make sure that the runnable below will observe the new value of "tm"
 		 * and "state" (the runnable will be executed in a different thread,
@@ -804,7 +780,7 @@ public class Connection
 
 			try
 			{
-				tm.initialize(cryptoWishList, verifier, dhgexpara, connectTimeout, getOrCreateSecureRND(), proxyData);
+				tm.initialize(cryptoWishList, verifier, dhgexpara, connectTimeout, readTimeout, getOrCreateSecureRND(), proxyData);
 			}
 			catch (SocketTimeoutException se)
 			{
@@ -848,7 +824,7 @@ public class Connection
 		catch (IOException e1)
 		{
 			/* This will also invoke any registered connection monitors */
-			close(new Throwable("There was a problem during connect."), false);
+			close(new Throwable("There was a problem during connect.").initCause(e1), false);
 
 			synchronized (state)
 			{
@@ -957,58 +933,6 @@ public class Connection
 	}
 
 	/**
-	 * Creates a new {@link DynamicPortForwarder}. A
-	 * <code>DynamicPortForwarder</code> forwards TCP/IP connections that arrive
-	 * at a local port via the secure tunnel to another host that is chosen via
-	 * the SOCKS protocol.
-	 * <p>
-	 * This method must only be called after one has passed successfully the
-	 * authentication step. There is no limit on the number of concurrent
-	 * forwardings.
-	 * 
-	 * @param local_port
-	 * @return A {@link DynamicPortForwarder} object.
-	 * @throws IOException
-	 */
-	public synchronized DynamicPortForwarder createDynamicPortForwarder(int local_port) throws IOException
-	{
-		if (tm == null)
-			throw new IllegalStateException("Cannot forward ports, you need to establish a connection first.");
-
-		if (!authenticated)
-			throw new IllegalStateException("Cannot forward ports, connection is not authenticated.");
-
-		return new DynamicPortForwarder(cm, local_port);
-	}
-	
-	/**
-	 * Creates a new {@link DynamicPortForwarder}. A
-	 * <code>DynamicPortForwarder</code> forwards TCP/IP connections that arrive
-	 * at a local port via the secure tunnel to another host that is chosen via
-	 * the SOCKS protocol.
-	 * <p>
-	 * This method must only be called after one has passed successfully the
-	 * authentication step. There is no limit on the number of concurrent
-	 * forwardings.
-	 * 
-	 * @param addr
-	 *            specifies the InetSocketAddress where the local socket shall
-	 *            be bound to.
-	 * @return A {@link DynamicPortForwarder} object.
-	 * @throws IOException
-	 */
-	public synchronized DynamicPortForwarder createDynamicPortForwarder(InetSocketAddress addr) throws IOException
-	{
-		if (tm == null)
-			throw new IllegalStateException("Cannot forward ports, you need to establish a connection first.");
-
-		if (!authenticated)
-			throw new IllegalStateException("Cannot forward ports, connection is not authenticated.");
-
-		return new DynamicPortForwarder(cm, addr);
-	}
-	
-	/**
 	 * Create a very basic {@link SCPClient} that can be used to copy files
 	 * from/to the SSH-2 server.
 	 * <p>
@@ -1088,6 +1012,14 @@ public class Connection
 					"Cannot get details of connection, you need to establish a connection first.");
 		return tm.getConnectionInfo(1);
 	}
+	
+	public synchronized ClientServerHello getVersionInfo() throws IOException {
+		if (tm == null)
+			throw new IllegalStateException(
+					"Cannot get details of connection, you need to establish a connection first.");
+		return tm.getVersionInfo();
+	}
+
 
 	/**
 	 * After a successful connect, one has to authenticate oneself. This method
@@ -1198,7 +1130,7 @@ public class Connection
 	private final SecureRandom getOrCreateSecureRND()
 	{
 		if (generator == null)
-			generator = new SecureRandom();
+            generator = RandomFactory.create();
 
 		return generator;
 	}
@@ -1569,6 +1501,8 @@ public class Connection
 	 *            a {@link DebugLogger DebugLogger} instance, <code>null</code>
 	 *            means logging using the simple logger which logs all messages
 	 *            to to stderr. Ignored if enabled is <code>false</code>
+     * @deprecated
+     *      Logging is now sent automatically to java.util.logging, and never to the {@link DebugLogger}.
 	 */
 	public synchronized void enableDebugging(boolean enable, DebugLogger logger)
 	{
@@ -1592,8 +1526,6 @@ public class Connection
 					}
 				};
 			}
-
-			Logger.logger = logger;
 		}
 	}
 
@@ -1625,4 +1557,72 @@ public class Connection
 
 		cm.requestGlobalTrileadPing();
 	}
+
+    /**
+     * If the socket connection is lost (either by this side closing down or the other side closing down),
+     * return a non-null object indicating the cause of the connection loss.
+     */
+    public Throwable getReasonClosedCause() {
+        return tm.getReasonClosedCause();
+    }
+
+    /**
+     * Executes a process remotely and blocks until its completion.
+     *
+     * @param output
+     *      The stdout/stderr will be sent to this stream.
+     */
+    public int exec(String command, OutputStream output) throws IOException, InterruptedException {
+        Session session = openSession();
+        try {
+            session.execCommand(command);
+            PumpThread t1 = new PumpThread(session.getStdout(), output);
+            t1.start();
+            PumpThread t2 = new PumpThread(session.getStderr(), output);
+            t2.start();
+            session.getStdin().close();
+            t1.join();
+            t2.join();
+
+            // wait for some time since the delivery of the exit status often gets delayed
+            session.waitForCondition(ChannelCondition.EXIT_STATUS,3000);
+            Integer r = session.getExitStatus();
+            if(r!=null) return r.intValue();
+            return -1;
+        } finally {
+            session.close();
+        }
+    }
+
+    /**
+     * Pumps {@link InputStream} to {@link OutputStream}.
+     *
+     * @author Kohsuke Kawaguchi
+     */
+    private static final class PumpThread extends Thread {
+        private final InputStream in;
+        private final OutputStream out;
+
+        public PumpThread(InputStream in, OutputStream out) {
+            super("pump thread");
+            this.in = in;
+            this.out = out;
+        }
+
+        public void run() {
+            byte[] buf = new byte[1024];
+            try {
+                while(true) {
+                    int len = in.read(buf);
+                    if(len<0) {
+                        in.close();
+                        return;
+                    }
+                    out.write(buf,0,len);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
 }

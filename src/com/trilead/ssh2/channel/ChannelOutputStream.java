@@ -13,21 +13,20 @@ public final class ChannelOutputStream extends OutputStream
 {
 	Channel c;
 
-	private byte[] writeBuffer;
-
 	boolean isClosed = false;
 	
 	ChannelOutputStream(Channel c)
 	{
 		this.c = c;
-		writeBuffer = new byte[1];
 	}
 
 	public void write(int b) throws IOException
 	{	
-		writeBuffer[0] = (byte) b;
+		byte[] buff = new byte[1];
 		
-		write(writeBuffer, 0, 1);
+		buff[0] = (byte) b;
+		
+		write(buff, 0, 1);
 	}
 
 	public void close() throws IOException

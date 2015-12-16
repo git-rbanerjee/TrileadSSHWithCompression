@@ -1,4 +1,3 @@
-
 package com.trilead.ssh2.channel;
 
 import java.io.IOException;
@@ -17,13 +16,13 @@ import java.net.Socket;
  */
 public class StreamForwarder extends Thread
 {
-	final OutputStream os;
-	final InputStream is;
-	final byte[] buffer = new byte[Channel.CHANNEL_BUFFER_SIZE];
-	final Channel c;
-	final StreamForwarder sibling;
-	final Socket s;
-	final String mode;
+	OutputStream os;
+	InputStream is;
+	byte[] buffer;
+	Channel c;
+	StreamForwarder sibling;
+	Socket s;
+	String mode;
 
 	StreamForwarder(Channel c, StreamForwarder sibling, Socket s, InputStream is, OutputStream os, String mode)
 			throws IOException
@@ -34,7 +33,10 @@ public class StreamForwarder extends Thread
 		this.c = c;
 		this.sibling = sibling;
 		this.s = s;
-	}
+        // window size is for the other side of the network with some latency.
+        // we don't need such a big buffer for a copy stream tight loop
+        this.buffer = new byte[8192/*c.channelBufferSize*/];
+    }
 
 	public void run()
 	{
@@ -97,12 +99,11 @@ public class StreamForwarder extends Thread
 				catch (IOException e3)
 				{
 				}
-			}
 
-			if (s != null) {
 				try
 				{
-					s.close();
+					if (s != null)
+						s.close();
 				}
 				catch (IOException e1)
 				{

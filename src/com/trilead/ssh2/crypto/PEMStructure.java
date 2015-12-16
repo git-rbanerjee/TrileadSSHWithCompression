@@ -10,8 +10,8 @@ package com.trilead.ssh2.crypto;
 
 public class PEMStructure
 {
-	public int pemType;
+	int pemType;
 	String dekInfo[];
 	String procType[];
-	public byte[] data;
+	byte[] data;
 }

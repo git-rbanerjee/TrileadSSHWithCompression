@@ -8,28 +8,24 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.io.Reader;
 import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.security.InvalidKeyException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.PublicKey;
 import java.security.SecureRandom;
-import java.security.interfaces.DSAPublicKey;
-import java.security.interfaces.ECPublicKey;
-import java.security.interfaces.RSAPublicKey;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.Locale;
 import java.util.Vector;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-
 import com.trilead.ssh2.crypto.Base64;
+import com.trilead.ssh2.crypto.digest.Digest;
+import com.trilead.ssh2.crypto.digest.HMAC;
+import com.trilead.ssh2.crypto.digest.MD5;
+import com.trilead.ssh2.crypto.digest.SHA1;
+import com.trilead.ssh2.log.Logger;
+import com.trilead.ssh2.signature.DSAPublicKey;
 import com.trilead.ssh2.signature.DSASHA1Verify;
-import com.trilead.ssh2.signature.ECDSASHA2Verify;
+import com.trilead.ssh2.signature.RSAPublicKey;
 import com.trilead.ssh2.signature.RSASHA1Verify;
 
 
@@ -51,23 +47,26 @@ import com.trilead.ssh2.signature.RSASHA1Verify;
 
 public class KnownHosts
 {
+	private static final Logger LOGGER = Logger.getLogger(KnownHosts.class);
+
 	public static final int HOSTKEY_IS_OK = 0;
 	public static final int HOSTKEY_IS_NEW = 1;
 	public static final int HOSTKEY_HAS_CHANGED = 2;
+    private static final SecureRandom SECURE_RANDOM = RandomFactory.create();
 
 	private class KnownHostsEntry
 	{
 		String[] patterns;
-		PublicKey key;
+		Object key;
 
-		KnownHostsEntry(String[] patterns, PublicKey key)
+		KnownHostsEntry(String[] patterns, Object key)
 		{
 			this.patterns = patterns;
 			this.key = key;
 		}
 	}
 
-	private LinkedList<KnownHostsEntry> publicKeys = new LinkedList<KnownHostsEntry>();
+	private LinkedList publicKeys = new LinkedList();
 
 	public KnownHosts()
 	{
@@ -94,39 +93,28 @@ public class KnownHosts
 	 * @param serverHostKey as passed to the {@link ServerHostKeyVerifier}.
 	 * @throws IOException
 	 */
-	public void addHostkey(String hostnames[], String serverHostKeyAlgorithm, byte[] serverHostKey) throws IOException
-	{
-		if (hostnames == null)
+	public void addHostkey(String[] hostnames, String serverHostKeyAlgorithm, byte[] serverHostKey) throws IOException {
+		if (hostnames == null) {
 			throw new IllegalArgumentException("hostnames may not be null");
+		}
 
-		if ("ssh-rsa".equals(serverHostKeyAlgorithm))
-		{
-			RSAPublicKey rpk = RSASHA1Verify.decodeSSHRSAPublicKey(serverHostKey);
+		if ("ssh-rsa".equals(serverHostKeyAlgorithm)) {
+			final RSAPublicKey rpk = RSASHA1Verify.decodeSSHRSAPublicKey(serverHostKey);
 
-			synchronized (publicKeys)
-			{
+			synchronized (publicKeys) {
 				publicKeys.add(new KnownHostsEntry(hostnames, rpk));
 			}
 		}
-		else if ("ssh-dss".equals(serverHostKeyAlgorithm))
-		{
-			DSAPublicKey dpk = DSASHA1Verify.decodeSSHDSAPublicKey(serverHostKey);
+		else if ("ssh-dss".equals(serverHostKeyAlgorithm)) {
+			final DSAPublicKey dpk = DSASHA1Verify.decodeSSHDSAPublicKey(serverHostKey);
 
-			synchronized (publicKeys)
-			{
+			synchronized (publicKeys) {
 				publicKeys.add(new KnownHostsEntry(hostnames, dpk));
 			}
 		}
-		else if (serverHostKeyAlgorithm.startsWith(ECDSASHA2Verify.ECDSA_SHA2_PREFIX))
-		{
-			ECPublicKey epk = ECDSASHA2Verify.decodeSSHECDSAPublicKey(serverHostKey);
-
-			synchronized (publicKeys) {
-				publicKeys.add(new KnownHostsEntry(hostnames, epk));
-			}
+		else {
+			throw new IOWarningException("Unknwon host key type (" + serverHostKeyAlgorithm + ")");
 		}
-		else
-			throw new IOException("Unknwon host key type (" + serverHostKeyAlgorithm + ")");
 	}
 
 	/**
@@ -154,22 +142,17 @@ public class KnownHosts
 	/**
 	 * Generate the hashed representation of the given hostname. Useful for adding entries
 	 * with hashed hostnames to a known_hosts file. (see -H option of OpenSSH key-gen).
-	 *
+	 *  
 	 * @param hostname
 	 * @return the hashed representation, e.g., "|1|cDhrv7zwEUV3k71CEPHnhHZezhA=|Xo+2y6rUXo2OIWRAYhBOIijbJMA="
 	 */
 	public static final String createHashedHostname(String hostname)
 	{
-		MessageDigest sha1;
-		try {
-			sha1 = MessageDigest.getInstance("SHA1");
-		} catch (NoSuchAlgorithmException e) {
-			throw new RuntimeException("VM doesn't support SHA1", e);
-		}
+		SHA1 sha1 = new SHA1();
 
 		byte[] salt = new byte[sha1.getDigestLength()];
 
-		new SecureRandom().nextBytes(salt);
+		SECURE_RANDOM.nextBytes(salt);
 
 		byte[] hash = hmacSha1Hash(salt, hostname);
 
@@ -181,17 +164,12 @@ public class KnownHosts
 
 	private static final byte[] hmacSha1Hash(byte[] salt, String hostname)
 	{
-		Mac hmac;
-		try {
-			hmac = Mac.getInstance("HmacSHA1");
-			if (salt.length != hmac.getMacLength())
-				throw new IllegalArgumentException("Salt has wrong length (" + salt.length + ")");
-			hmac.init(new SecretKeySpec(salt, "HmacSHA1"));
-		} catch (NoSuchAlgorithmException e) {
-			throw new RuntimeException("Unable to HMAC-SHA1", e);
-		} catch (InvalidKeyException e) {
-			throw new RuntimeException("Unable to create SecretKey", e);
-		}
+		SHA1 sha1 = new SHA1();
+
+		if (salt.length != sha1.getDigestLength())
+			throw new IllegalArgumentException("Salt has wrong length (" + salt.length + ")");
+
+		HMAC hmac = new HMAC(sha1, salt, salt.length);
 
 		try
 		{
@@ -202,8 +180,12 @@ public class KnownHosts
 			 * Java implementations. But... you never know. */
 			hmac.update(hostname.getBytes());
 		}
+		
+		byte[] dig = new byte[hmac.getDigestLength()];
 
-		return hmac.doFinal();
+		hmac.digest(dig);
+
+		return dig;
 	}
 
 	private final boolean checkHashed(String entry, String hostname)
@@ -232,13 +214,10 @@ public class KnownHosts
 			return false;
 		}
 
-		try {
-			MessageDigest sha1 = MessageDigest.getInstance("SHA1");
-			if (salt.length != sha1.getDigestLength())
-				return false;
-		} catch (NoSuchAlgorithmException e) {
-			throw new RuntimeException("VM does not support SHA1", e);
-		}
+		SHA1 sha1 = new SHA1();
+
+		if (salt.length != sha1.getDigestLength())
+			return false;
 
 		byte[] dig = hmacSha1Hash(salt, hostname);
 
@@ -249,17 +228,17 @@ public class KnownHosts
 		return true;
 	}
 
-	private int checkKey(String remoteHostname, PublicKey remoteKey)
+	private int checkKey(String remoteHostname, Object remoteKey)
 	{
 		int result = HOSTKEY_IS_NEW;
 
 		synchronized (publicKeys)
 		{
-			Iterator<KnownHostsEntry> i = publicKeys.iterator();
-
+			Iterator i = publicKeys.iterator();
+			
 			while (i.hasNext())
 			{
-				KnownHostsEntry ke = i.next();
+				KnownHostsEntry ke = (KnownHostsEntry) i.next();
 
 				if (hostnameMatches(ke.patterns, remoteHostname) == false)
 					continue;
@@ -275,17 +254,17 @@ public class KnownHosts
 		return result;
 	}
 
-	private Vector<PublicKey> getAllKeys(String hostname)
+	private Vector getAllKeys(String hostname)
 	{
-		Vector<PublicKey> keys = new Vector<PublicKey>();
+		Vector keys = new Vector();
 
 		synchronized (publicKeys)
 		{
-			Iterator<KnownHostsEntry> i = publicKeys.iterator();
+			Iterator i = publicKeys.iterator();
 
 			while (i.hasNext())
 			{
-				KnownHostsEntry ke = i.next();
+				KnownHostsEntry ke = (KnownHostsEntry) i.next();
 
 				if (hostnameMatches(ke.patterns, hostname) == false)
 					continue;
@@ -343,7 +322,7 @@ public class KnownHosts
 		boolean isMatch = false;
 		boolean negate = false;
 
-		hostname = hostname.toLowerCase(Locale.US);
+		hostname = hostname.toLowerCase();
 
 		for (int k = 0; k < hostpatterns.length; k++)
 		{
@@ -385,7 +364,7 @@ public class KnownHosts
 			}
 			else
 			{
-				pattern = pattern.toLowerCase(Locale.US);
+				pattern = pattern.toLowerCase();
 
 				if ((pattern.indexOf('?') != -1) || (pattern.indexOf('*') != -1))
 				{
@@ -402,70 +381,119 @@ public class KnownHosts
 						return false;
 					isMatch = true;
 				}
+				else
+				{
+					final int indexColon = pattern.indexOf(':');
+					final int indexLastColon = pattern.indexOf(':');
+					if (indexColon > 0 && indexColon < pattern.length() - 2 && indexColon == indexLastColon)
+					{
+						final String bracketizedHost = '[' + hostname + ']';
+						if (pattern.startsWith(bracketizedHost))
+						{
+							if (negate)
+								return false;
+							isMatch = true;
+						}
+					}
+				}
 			}
 		}
 
 		return isMatch;
 	}
 
-	private void initialize(char[] knownHostsData) throws IOException
-	{
-		BufferedReader br = new BufferedReader(new CharArrayReader(knownHostsData));
-
-		while (true)
-		{
-			String line = br.readLine();
-
-			if (line == null)
-				break;
-
+	private void initialize(char[] knownHostsData) throws IOException {
+		final BufferedReader br = new BufferedReader(new CharArrayReader(knownHostsData));
+		for (String line = br.readLine(); line != null; line = br.readLine()) {
 			line = line.trim();
-
-			if (line.startsWith("#"))
+			if (line.startsWith("#")) {
 				continue;
+			}
 
-			String[] arr = line.split(" ");
+			final String[] arr = line.split(" "); 
+			if (arr.length < 3) {
+				continue;
+			}
 
-			if (arr.length >= 3)
-			{
-				if ((arr[1].compareTo("ssh-rsa") == 0) || (arr[1].compareTo("ssh-dss") == 0))
-				{
-					String[] hostnames = arr[0].split(",");
+			final String serverHostKeyAlgorithm = arr[1];
+			if (!"ssh-rsa".equals(serverHostKeyAlgorithm) && !"ssh-dss".equals(serverHostKeyAlgorithm)) {
+				continue;
+			}
 
-					byte[] msg = Base64.decode(arr[2].toCharArray());
+			final String[] hostnames = arr[0].split(",");
+			final byte[] msg = Base64.decode(arr[2].toCharArray());
 
-					addHostkey(hostnames, arr[1], msg);
-				}
+			try {
+				addHostkey(hostnames, serverHostKeyAlgorithm, msg);
+			}
+			catch (IOWarningException ex) {
+				LOGGER.log(30, "Ignored invalid line '" + line + "'",ex);
 			}
 		}
 	}
 
-	private void initialize(File knownHosts) throws IOException
-	{
-		char[] buff = new char[512];
+	private void initialize(File knownHosts) throws IOException {
+		final char[] buffer = new char[512];
 
-		CharArrayWriter cw = new CharArrayWriter();
+		final CharArrayWriter charWriter = new CharArrayWriter();
 
 		knownHosts.createNewFile();
 
-		FileReader fr = new FileReader(knownHosts);
+		final Reader reader = new FileReader(knownHosts);
+		try {
+			while (true) {
+				final int readCharCount = reader.read(buffer);
+				if (readCharCount < 0) {
+					break;
+				}
 
-		while (true)
-		{
-			int len = fr.read(buff);
-			if (len < 0)
-				break;
-			cw.write(buff, 0, len);
+				charWriter.write(buffer, 0, readCharCount);
+			}
+		}
+		finally {
+			reader.close();
 		}
 
-		fr.close();
-
-		initialize(cw.toCharArray());
+		initialize(charWriter.toCharArray());
 	}
 
-	private final boolean matchKeys(PublicKey key1, PublicKey key2)
+	private final boolean matchKeys(Object key1, Object key2)
 	{
-		return key1.equals(key2);
+		if ((key1 instanceof RSAPublicKey) && (key2 instanceof RSAPublicKey))
+		{
+			RSAPublicKey savedRSAKey = (RSAPublicKey) key1;
+			RSAPublicKey remoteRSAKey = (RSAPublicKey) key2;
+
+			if (savedRSAKey.getE().equals(remoteRSAKey.getE()) == false)
+				return false;
+
+			if (savedRSAKey.getN().equals(remoteRSAKey.getN()) == false)
+				return false;
+
+			return true;
+		}
+
+		if ((key1 instanceof DSAPublicKey) && (key2 instanceof DSAPublicKey))
+		{
+			DSAPublicKey savedDSAKey = (DSAPublicKey) key1;
+			DSAPublicKey remoteDSAKey = (DSAPublicKey) key2;
+
+			if (savedDSAKey.getG().equals(remoteDSAKey.getG()) == false)
+				return false;
+
+			if (savedDSAKey.getP().equals(remoteDSAKey.getP()) == false)
+				return false;
+
+			if (savedDSAKey.getQ().equals(remoteDSAKey.getQ()) == false)
+				return false;
+
+			if (savedDSAKey.getY().equals(remoteDSAKey.getY()) == false)
+				return false;
+
+			return true;
+		}
+
+		return false;
 	}
 
 	private final boolean pseudoRegex(char[] pattern, int i, char[] match, int j)
@@ -523,7 +551,7 @@ public class KnownHosts
 	{
 		String preferredAlgo = null;
 
-		Vector<PublicKey> keys = getAllKeys(hostname);
+		Vector keys = getAllKeys(hostname);
 
 		for (int i = 0; i < keys.size(); i++)
 		{
@@ -590,7 +618,7 @@ public class KnownHosts
 	 */
 	public int verifyHostkey(String hostname, String serverHostKeyAlgorithm, byte[] serverHostKey) throws IOException
 	{
-		PublicKey remoteKey = null;
+		Object remoteKey = null;
 
 		if ("ssh-rsa".equals(serverHostKeyAlgorithm))
 		{
@@ -599,10 +627,6 @@ public class KnownHosts
 		else if ("ssh-dss".equals(serverHostKeyAlgorithm))
 		{
 			remoteKey = DSASHA1Verify.decodeSSHDSAPublicKey(serverHostKey);
-		}
-		else if (serverHostKeyAlgorithm.startsWith("ecdsa-sha2-"))
-		{
-			remoteKey = ECDSASHA2Verify.decodeSSHECDSAPublicKey(serverHostKey);
 		}
 		else
 			throw new IllegalArgumentException("Unknown hostkey type " + serverHostKeyAlgorithm);
@@ -700,29 +724,20 @@ public class KnownHosts
 	 */
 	static final private byte[] rawFingerPrint(String type, String keyType, byte[] hostkey)
 	{
-		MessageDigest dig = null;
+		Digest dig = null;
 
-		try {
-			if ("md5".equals(type))
-			{
-				dig = MessageDigest.getInstance("MD5");
-			}
-			else if ("sha1".equals(type))
-			{
-				dig = MessageDigest.getInstance("SHA1");
-			}
-			else
-			{
-				throw new IllegalArgumentException("Unknown hash type " + type);
-			}
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalArgumentException("Unknown hash type " + type);
-		}
-
-		if (keyType.startsWith("ecdsa-sha2-"))
+		if ("md5".equals(type))
 		{
+			dig = new MD5();
 		}
-		else if ("ssh-rsa".equals(keyType))
+		else if ("sha1".equals(type))
+		{
+			dig = new SHA1();
+		}
+		else
+			throw new IllegalArgumentException("Unknown hash type " + type);
+
+		if ("ssh-rsa".equals(keyType))
 		{
 		}
 		else if ("ssh-dss".equals(keyType))
@@ -735,7 +750,9 @@ public class KnownHosts
 			throw new IllegalArgumentException("hostkey is null");
 
 		dig.update(hostkey);
-		return dig.digest();
+		byte[] res = new byte[dig.getDigestLength()];
+		dig.digest(res);
+		return res;
 	}
 
 	/**

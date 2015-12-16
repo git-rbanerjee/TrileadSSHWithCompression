@@ -1,8 +1,8 @@
-
 package com.trilead.ssh2.transport;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -54,16 +54,16 @@ import com.trilead.ssh2.util.Tokenizer;
  */
 public class TransportManager
 {
-	private static final Logger log = Logger.getLogger(TransportManager.class);
+    private static final Logger log = Logger.getLogger(TransportManager.class);
 
-	class HandlerEntry
+    class HandlerEntry
 	{
 		MessageHandler mh;
 		int low;
 		int high;
 	}
 
-	private final Vector<byte[]> asynchronousQueue = new Vector<byte[]>();
+	private final Vector asynchronousQueue = new Vector();
 	private Thread asynchronousThread = null;
 
 	class AsynchronousWorker extends Thread
@@ -96,7 +96,7 @@ public class TransportManager
 						}
 					}
 
-					msg = asynchronousQueue.remove(0);
+					msg = (byte[]) asynchronousQueue.remove(0);
 				}
 
 				/* The following invocation may throw an IOException.
@@ -127,22 +127,22 @@ public class TransportManager
 	int port;
 	final Socket sock = new Socket();
 
-	Object connectionSemaphore = new Object();
+	final Object connectionSemaphore = new Object();
 
 	boolean flagKexOngoing = false;
-	boolean connectionClosed = false;
 
 	Throwable reasonClosedCause = null;
 
 	TransportConnection tc;
 	KexManager km;
 
-	Vector<HandlerEntry> messageHandlers = new Vector<HandlerEntry>();
+	Vector messageHandlers = new Vector();
 
 	Thread receiveThread;
 
 	Vector connectionMonitors = new Vector();
 	boolean monitorsWereInformed = false;
+	private ClientServerHello versions;
 
 	/**
 	 * There were reports that there are JDKs which use
@@ -230,7 +230,15 @@ public class TransportManager
 	{
 		return km.getOrWaitForConnectionInfo(kexNumber);
 	}
+	
+	public ClientServerHello getVersionInfo() {
+		return versions;
+	}
 
+    /**
+     * If the socket connection is lost (either by this side closing down or the other side closing down),
+     * return a non-null object indicating the cause of the connection loss.
+     */
 	public Throwable getReasonClosedCause()
 	{
 		synchronized (connectionSemaphore)
@@ -238,6 +246,10 @@ public class TransportManager
 			return reasonClosedCause;
 		}
 	}
+
+    public boolean isConnectionClosed() {
+        return getReasonClosedCause()!=null;
+    }
 
 	public byte[] getSessionIdentifier()
 	{
@@ -268,7 +280,7 @@ public class TransportManager
 
 		synchronized (connectionSemaphore)
 		{
-			if (connectionClosed == false)
+			if (reasonClosedCause==null)
 			{
 				if (useDisconnectPacket == true)
 				{
@@ -292,8 +304,9 @@ public class TransportManager
 					}
 				}
 
-				connectionClosed = true;
-				reasonClosedCause = cause; /* may be null */
+                if (cause==null)
+                    cause = new Exception("Unknown cause");
+				reasonClosedCause = cause;
 			}
 			connectionSemaphore.notifyAll();
 		}
@@ -332,7 +345,7 @@ public class TransportManager
 		}
 	}
 
-	private void establishConnection(ProxyData proxyData, int connectTimeout) throws IOException
+	private void establishConnection(ProxyData proxyData, int connectTimeout, int readTimeout) throws IOException
 	{
 		/* See the comment for createInetAddress() */
 
@@ -340,7 +353,7 @@ public class TransportManager
 		{
 			InetAddress addr = createInetAddress(hostname);
 			sock.connect(new InetSocketAddress(addr, port), connectTimeout);
-			sock.setSoTimeout(0);
+			sock.setSoTimeout(readTimeout);
 			return;
 		}
 
@@ -352,7 +365,7 @@ public class TransportManager
 
 			InetAddress addr = createInetAddress(pd.proxyHost);
 			sock.connect(new InetSocketAddress(addr, pd.proxyPort), connectTimeout);
-			sock.setSoTimeout(0);
+			sock.setSoTimeout(readTimeout);
 
 			/* OK, now tell the proxy where we actually want to connect to */
 
@@ -442,12 +455,17 @@ public class TransportManager
 		throw new IOException("Unsupported ProxyData");
 	}
 
-	public void initialize(CryptoWishList cwl, ServerHostKeyVerifier verifier, DHGexParameters dhgex,
-			int connectTimeout, SecureRandom rnd, ProxyData proxyData) throws IOException
+    public void initialize(CryptoWishList cwl, ServerHostKeyVerifier verifier, DHGexParameters dhgex,
+            int connectTimeout, SecureRandom rnd, ProxyData proxyData) throws IOException {
+        initialize(cwl, verifier, dhgex, connectTimeout, 0, rnd, proxyData);
+    }
+    
+    public void initialize(CryptoWishList cwl, ServerHostKeyVerifier verifier, DHGexParameters dhgex,
+			int connectTimeout, int readTimeout, SecureRandom rnd, ProxyData proxyData) throws IOException
 	{
 		/* First, establish the TCP connection to the SSH-2 server */
 
-		establishConnection(proxyData, connectTimeout);
+		establishConnection(proxyData, connectTimeout, readTimeout);
 
 		/* Parse the server line and say hello - important: this information is later needed for the
 		 * key exchange (to stop man-in-the-middle attacks) - that is why we wrap it into an object
@@ -455,6 +473,7 @@ public class TransportManager
 		 */
 
 		ClientServerHello csh = new ClientServerHello(sock.getInputStream(), sock.getOutputStream());
+		versions = csh;
 
 		tc = new TransportConnection(sock.getInputStream(), sock.getOutputStream(), rnd);
 
@@ -465,16 +484,19 @@ public class TransportManager
 		{
 			public void run()
 			{
+                Throwable cause;
 				try
 				{
 					receiveLoop();
+                    cause = new AssertionError();   // receiveLoop never returns normally
 				}
 				catch (IOException e)
 				{
-					close(e, false);
+                    if (log.isEnabled() && !isConnectionClosed())
+                        log.log(10, "Receive thread: error in receiveLoop",e);
 
-					if (log.isEnabled())
-						log.log(10, "Receive thread: error in receiveLoop: " + e.getMessage());
+                    cause = e;
+					close(e, false);
 				}
 
 				if (log.isEnabled())
@@ -486,7 +508,7 @@ public class TransportManager
 				{
 					try
 					{
-						km.handleMessage(null, 0);
+						km.handleEndMessage(cause);
 					}
 					catch (IOException e)
 					{
@@ -495,10 +517,10 @@ public class TransportManager
 
 				for (int i = 0; i < messageHandlers.size(); i++)
 				{
-					HandlerEntry he = messageHandlers.elementAt(i);
+					HandlerEntry he = (HandlerEntry) messageHandlers.elementAt(i);
 					try
 					{
-						he.mh.handleMessage(null, 0);
+						he.mh.handleEndMessage(cause);
 					}
 					catch (Exception ignore)
 					{
@@ -530,7 +552,7 @@ public class TransportManager
 		{
 			for (int i = 0; i < messageHandlers.size(); i++)
 			{
-				HandlerEntry he = messageHandlers.elementAt(i);
+				HandlerEntry he = (HandlerEntry) messageHandlers.elementAt(i);
 				if ((he.mh == mh) && (he.low == low) && (he.high == high))
 				{
 					messageHandlers.removeElementAt(i);
@@ -544,12 +566,9 @@ public class TransportManager
 	{
 		synchronized (connectionSemaphore)
 		{
-			if (connectionClosed)
-			{
-				throw (IOException) new IOException("Sorry, this connection is closed.").initCause(reasonClosedCause);
-			}
+            ensureConnected();
 
-			flagKexOngoing = true;
+            flagKexOngoing = true;
 
 			try
 			{
@@ -563,7 +582,14 @@ public class TransportManager
 		}
 	}
 
-	public void kexFinished() throws IOException
+    private void ensureConnected() throws IOException {
+        if (reasonClosedCause!=null)
+        {
+            throw (IOException) new IOException("Sorry, this connection is closed.").initCause(reasonClosedCause);
+        }
+    }
+
+    public void kexFinished() throws IOException
 	{
 		synchronized (connectionSemaphore)
 		{
@@ -607,7 +633,7 @@ public class TransportManager
 	public void startCompression() {
 		tc.startCompression();
 	}
-
+	
 	public void sendAsynchronousMessage(byte[] msg) throws IOException
 	{
 		synchronized (asynchronousQueue)
@@ -653,13 +679,9 @@ public class TransportManager
 		{
 			while (true)
 			{
-				if (connectionClosed)
-				{
-					throw (IOException) new IOException("Sorry, this connection is closed.")
-							.initCause(reasonClosedCause);
-				}
+                ensureConnected();
 
-				if (flagKexOngoing == false)
+                if (flagKexOngoing == false)
 					break;
 
 				try
@@ -668,6 +690,7 @@ public class TransportManager
 				}
 				catch (InterruptedException e)
 				{
+					throw new InterruptedIOException();
 				}
 			}
 
@@ -685,7 +708,7 @@ public class TransportManager
 
 	public void receiveLoop() throws IOException
 	{
-		byte[] msg = new byte[35000];
+		byte[] msg = new byte[MAX_PACKET_SIZE];
 
 		while (true)
 		{
@@ -776,16 +799,16 @@ public class TransportManager
 				km.handleMessage(msg, msglen);
 				continue;
 			}
-
+			
 			if (type == Packets.SSH_MSG_USERAUTH_SUCCESS) {
 				tc.startCompression();
 			}
-			
+
 			MessageHandler mh = null;
 
 			for (int i = 0; i < messageHandlers.size(); i++)
 			{
-				HandlerEntry he = messageHandlers.elementAt(i);
+				HandlerEntry he = (HandlerEntry) messageHandlers.elementAt(i);
 				if ((he.low <= type) && (type <= he.high))
 				{
 					mh = he.mh;
@@ -799,4 +822,11 @@ public class TransportManager
 			mh.handleMessage(msg, msglen);
 		}
 	}
+
+    /**
+     * Advertised maximum SSH packet size that the other side can send to us.
+     */
+    public static final int MAX_PACKET_SIZE = Integer.getInteger(
+    			TransportManager.class.getName()+".maxPacketSize",
+    			64*1024);
 }

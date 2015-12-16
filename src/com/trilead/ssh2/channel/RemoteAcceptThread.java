@@ -2,6 +2,7 @@
 package com.trilead.ssh2.channel;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.Socket;
 
 import com.trilead.ssh2.log.Logger;
@@ -40,7 +41,7 @@ public class RemoteAcceptThread extends Thread
 		this.targetPort = targetPort;
 
 		if (log.isEnabled())
-			log.log(20, "RemoteAcceptThread: " + remoteConnectedAddress + "/" + remoteConnectedPort + ", R: "
+			log.log(30, "RemoteAcceptThread: " + remoteConnectedAddress + "/" + remoteConnectedPort + ", R: "
 					+ remoteOriginatorAddress + "/" + remoteOriginatorPort);
 	}
 
@@ -52,7 +53,7 @@ public class RemoteAcceptThread extends Thread
 
 			s = new Socket(targetAddress, targetPort);
 
-			StreamForwarder r2l = new StreamForwarder(c, null, s, c.getStdoutStream(), s.getOutputStream(),
+			StreamForwarder r2l = new StreamForwarder(c, null, null, c.getStdoutStream(), s.getOutputStream(),
 					"RemoteToLocal");
 			StreamForwarder l2r = new StreamForwarder(c, null, null, s.getInputStream(), c.getStdinStream(),
 					"LocalToRemote");
@@ -71,6 +72,7 @@ public class RemoteAcceptThread extends Thread
 				}
 				catch (InterruptedException e)
 				{
+                    throw new InterruptedIOException();
 				}
 			}
 
@@ -81,7 +83,7 @@ public class RemoteAcceptThread extends Thread
 		}
 		catch (IOException e)
 		{
-			log.log(50, "IOException in proxy code: " + e.getMessage());
+			log.log(50, "IOException in proxy code",e);
 
 			try
 			{
